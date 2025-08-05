@@ -1,0 +1,77 @@
+# 工作流名称
+name: Build and Push Docker Image to GHCR
+
+# 触发工作流的事件
+on:
+  # 当有代码推送到 main 分支时触发
+  push:
+    branches:
+      - 'main' # 你可以修改为你想要触发构建的分支，例如 'master'
+  # 允许你手动在 Actions 页面触发此工作流
+  workflow_dispatch:
+
+# 环境变量，方便统一管理镜像名称
+env:
+  # 定义你的镜像名称，格式为 ghcr.io/你的GitHub用户名/你的仓库名
+  # ${{ github.repository }} 是一个 GitHub Actions 的内置变量，会自动替换为 "用户名/仓库名"
+  IMAGE_NAME: ghcr.io/${{ github.repository }}
+
+# 工作流中的任务
+jobs:
+  # 定义一个名为 build-and-push 的任务
+  build-and-push:
+    # 指定运行此任务的虚拟机环境
+    runs-on: ubuntu-latest
+    # 为此任务授予权限，这是安全最佳实践
+    permissions:
+      contents: read      # 允许读取仓库内容 (checkout)
+      packages: write    # 允许写入 GitHub Packages (push image)
+
+    # 任务中的步骤
+    steps:
+      # 第 1 步：检出代码
+      # 使用官方的 checkout action 来获取你的仓库代码
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 第 2 步：登录到 GitHub Container Registry (GHCR)
+      # 使用官方的 docker/login-action
+      - name: Log in to the Container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          # ${{ github.actor }} 是触发工作流的用户名
+          username: ${{ github.actor }}
+          # ${{ secrets.GITHUB_TOKEN }} 是 GitHub 自动为每个工作流生成的临时令牌
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # 第 3 步：提取 Docker 镜像的元数据（标签和标签）
+      # 这个 action 会自动生成一些有用的标签，例如基于 commit SHA 和 'latest'
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          tags: |
+            # 为每次 commit 生成一个基于 SHA 的唯一标签
+            type=sha,prefix=,suffix=,format=short
+            # 当推送到默认分支（如此处的 'main'）时，打上 'latest' 标签
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      # 第 4 步：构建并推送 Docker 镜像
+      # 使用官方的 docker/build-push-action
+      - name: Build and push Docker image
+        id: build-and-push
+        uses: docker/build-push-action@v5
+        with:
+          # Dockerfile 的上下文路径（通常是项目根目录）
+          context: .
+          # 推送镜像到仓库
+          push: true
+          # 使用上一步生成的标签
+          tags: ${{ steps.meta.outputs.tags }}
+          # 使用上一步生成的标签
+          labels: ${{ steps.meta.outputs.labels }}
+          # 开启构建缓存，以加快后续构建速度
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
